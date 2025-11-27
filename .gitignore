@@ -1,0 +1,25 @@
+# Ignore Git internal folder (redundant; Git never tracks this, but for clarity)
+.git/
+
+# Ignore metadata
+.metadata/
+
+# Ignore *.ignore files and folders
+*.ignore
+*.ignore/
+
+# Ignore all build-related folders
+**/build/
+**/Build/
+**/BUILD/
+
+# Ignore all Debug and Release folders
+**/[Dd]ebug/
+**/[Rr]elease/
+
+# But keep Lib/Debug and Lib/Release
+!Lib/Debug/
+!Lib/Release/
+
+# Ignore temporary folders
+tmp/
