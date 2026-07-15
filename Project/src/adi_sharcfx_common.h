@@ -15,12 +15,14 @@
 *******************************************************************************
 */
 
-#ifndef __ADI_SHARCFX_COMMON_H__
-#define __ADI_SHARCFX_COMMON_H__
+#ifndef ADI_SHARCFX_COMMON_H_
+#define ADI_SHARCFX_COMMON_H_
 
 
 /*============= I N C L U D E S =============*/
+#ifdef ADI_DEBUG
 #include <stdio.h>
+#endif
 #include <math.h>
 #include <float.h>
 #include <complex.h>
@@ -36,7 +38,6 @@
 #include <xtensa/sim.h>
 #include <xtensa/tie/xt_pdxn.h>
 #endif
-//#define DISPLAY_CYCLE_COUNTS
 
 /*============= D E F I N E S =============*/
 #define NVEC 							32
@@ -49,23 +50,22 @@
 #define ARRAY_INPUT_SIZE           		8192
 #define INT_16BIT_MAX             		32767
 #define INT_16BIT_MIN            		-32768
-#define INT_8BIT_MAX                	127
-#define INT_8BIT_MIN               		-128
 #define INT_U8BIT_MAX               	255
 #define INT_3X3_FILTER_WIDTH_x_HEIGHT	9
 #define INT_3x3_FILTER_WIDTH			3
 #define ROUNDING_MODE_2					2
 #define STRIDE_2						2
-#define TEMP_BUFFER_SIZE 				96*96*20
-#define TEMP_BUFFER_SIZE_L3 			96*96*20*6
+#define TEMP_BUFFER_SIZE_L1 			(180*1024)      //180KB of L1 scratch buffer.
+#define TEMP_BUFFER_SIZE_L3_HALF        (1080*1024)     //1080KB of L3 scratch buffer.
+#define TEMP_BUFFER_SIZE_L3 			(2160*1024)     //2160KB of L3 scratch buffer.
 
 #define MIN(X, Y) 						(((X) < (Y)) ? (X) : (Y))
 #define MAX(X, Y) 						(((X) > (Y)) ? (X) : (Y))
 
 /*============= D A T A =============*/
-static int8_t pTemp[TEMP_BUFFER_SIZE]__attribute__((section(".L1.noload"), aligned(8)));		/*scratch buffer used inside kernels*/
-static int8_t pTempL3[TEMP_BUFFER_SIZE_L3]__attribute__((section(".L3.noload"), aligned(8)));		/*scratch buffer used inside kernels*/
-static int64_t nQFormatBuffer[ARRAY_INPUT_SIZE]__attribute__((section(".L3.noload"), aligned(8)));
+extern int8_t pTempL1[TEMP_BUFFER_SIZE_L1];		/*scratch buffer used inside kernels*/
+extern int8_t pTempL3[TEMP_BUFFER_SIZE_L3];		/*scratch buffer used inside kernels*/
+
 /*============= F U N C T I O N P R O T O T Y P E S =============*/
 
-#endif /* __ADI_SHARCFX_COMMON_H__ */
+#endif /* ADI_SHARCFX_COMMON_H_ */

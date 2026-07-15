@@ -18,10 +18,6 @@
 /*============= I N C L U D E S =============*/
 #include "adi_sharcfx_nn.h"
 
-/*============= D A T A =============*/
-//TODO: Make buffer dynamic
-int8_t pTempLocal[TEMP_BUFFER_SIZE_L3]__attribute__((section(".L3.noload"), aligned(8)));
-
 /*============= C O D E =============*/
 
 /**
@@ -87,8 +83,8 @@ void adi_sharcfx_depthconv2d_int8(const int8_t *pInputBuffer,
     int8_t *pPaddedBuffer;
 	int8_t *pTempBufCopy;
 	//chooses between the L1/L3 scratch buffer based on input/output dimensions.
-	if(nOutChannels * nInputHeight * nInputWidth < TEMP_BUFFER_SIZE){
-    	pTempBufCopy = (int8_t *)pTemp;
+	if(nOutChannels * nInputHeight * nInputWidth < TEMP_BUFFER_SIZE_L1){
+    	pTempBufCopy = (int8_t *)pTempL1;
     }
     else
     {
@@ -113,7 +109,7 @@ void adi_sharcfx_depthconv2d_int8(const int8_t *pInputBuffer,
 
     //use different input channel for each output channel
 
-    int8_t *pInpPtrTemp = pTempLocal;
+    int8_t *pInpPtrTemp = &pTempL3[TEMP_BUFFER_SIZE_L3_HALF]; //Use second half of L3 buffer
     if(nInChannels == nOutChannels) {
     	//CASE depth multiplier = 1. Data does not need to be reformatted.
         nPaddingChannels = nInChannels;
@@ -142,7 +138,7 @@ void adi_sharcfx_depthconv2d_int8(const int8_t *pInputBuffer,
     			}
         	}
         }
-        pInpPtrTemp = pTempLocal;
+        pInpPtrTemp = &pTempL3[TEMP_BUFFER_SIZE_L3_HALF];  //Use second half of L3 buffer
     }
 
 
