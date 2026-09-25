@@ -1,4 +1,4 @@
-/**
+﻿/**
 ********************************************************************************
 *
 * @file: adi_sharcfx_conv2d.cpp
@@ -19,7 +19,7 @@
 #include "adi_sharcfx_nn.h"
 
 /*============= F U N C T I O N P R O T O T Y P E S =============*/
-inline int8_t quantize_and_store(xb_vec2Mx40 acc,
+static inline int8_t quantize_and_store(xb_vec2Mx40 acc,
                                  int32_t pBiasBuffer,
                                  int32_t nQuantizedMultiplierValue,
                                  int32_t nQuantizedShiftValue,
@@ -68,6 +68,8 @@ void adi_sharcfx_conv2d_kernel1x1_int8(const int8_t* pInputBuffer,
                                     int32_t nInZeroPoint,
                                     int32_t nOutZeroPoint)
 {
+	if (!pInputBuffer || !pWeightsBuffer || !pOutputBuffer) return;
+
 	int8_t* __restrict outp = (int8_t*) pOutputBuffer;
 
 	const immediate Lane=0;
@@ -151,8 +153,8 @@ void adi_sharcfx_conv2d_kernel1x1_int8(const int8_t* pInputBuffer,
 					product =  PDX_SLA_80(product, (xb_int32)nQuantizedShift[nChannelCnt]);		//shift result by quantization multiplier
 					temp = PDX_PACKQSRV_80(product,2);								//packs 80bit product into 32bit var with saturation and rounding
 					temp+= (xb_int32)nOutZeroPoint;									//add output offset
-					temp = MIN(temp, (xb_int32)INT_8BIT_MAX);
-					temp = MAX(temp, (xb_int32)INT_8BIT_MIN);//8bit saturation check to store result
+					temp = MIN(temp, (xb_int32)ACT_MAX);
+					temp = MAX(temp, (xb_int32)ACT_MIN);//8bit saturation check to store result
 					*outp++ =(int8_t)((int32_t)temp);								//store result as 8-bit data
 				}
 			}
@@ -206,8 +208,8 @@ void adi_sharcfx_conv2d_kernel1x1_int8(const int8_t* pInputBuffer,
 					product =  PDX_SLA_80(product, (xb_int32)nQuantizedShift[nChannelCnt]);		//shift result by quantization multiplier
 					temp = PDX_PACKQSRV_80(product,2);								//packs 80bit product into 32bit var with saturation and rounding
 					temp+= (xb_int32)nOutZeroPoint;									//add output offset
-					temp = MIN(temp, (xb_int32)INT_8BIT_MAX);
-					temp = MAX(temp, (xb_int32)INT_8BIT_MIN);//8bit saturation check to store result
+					temp = MIN(temp, (xb_int32)ACT_MAX);
+					temp = MAX(temp, (xb_int32)ACT_MIN);//8bit saturation check to store result
 					*outp++ =(int8_t)((int32_t)temp);								//store result as 8-bit data
 				}
 			}
@@ -255,6 +257,8 @@ void adi_sharcfx_conv2d_kernel1x1_noninterleaved_int16(const int8_t  *pInputBuff
                               int32_t       pInZeroPoint,
                               int32_t       pOutZeroPoint)
 {
+	if (!pInputBuffer || !pWeightsBuffer || !pOutputBuffer) return;
+
 	//TODO:Separate out width and height
 	const int8_t *pInputBuffer_copy = pInputBuffer;
 	const int nSize = (nOutWidth * nOutWidth);
@@ -516,6 +520,7 @@ void adi_sharcfx_conv2d_kernel3x3_stride2_valid_pad_int8(const int8_t* pInputBuf
                                      int32_t pInZeroPoint,
                                      int32_t pOutZeroPoint)
 {
+	if (!pInputBuffer || !pWeightsBuffer || !pOutputBuffer) return;
 
 	int8_t* __restrict outp = (int8_t*) pOutputBuffer;
 
@@ -684,6 +689,7 @@ void adi_sharcfx_conv2d_kernel3x3_stride1_same_pad_int8(const int8_t* pInputBuff
                                      int32_t pInZeroPoint,
                                      int32_t pOutZeroPoint)
 {
+	if (!pInputBuffer || !pWeightsBuffer || !pOutputBuffer) return;
 
 	int8_t* __restrict outp = (int8_t*) pOutputBuffer;
 
@@ -1678,6 +1684,7 @@ void adi_sharcfx_conv2d_kernel3x3_stride1_valid_pad_int8 (const int8_t* pInputBu
                                                     int32_t pInZeroPoint,
                                                     int32_t pOutZeroPoint)
 {
+	if (!pInputBuffer || !pWeightsBuffer || !pOutputBuffer) return;
 
 	int8_t* __restrict outp = (int8_t*) pOutputBuffer;
 
@@ -1820,8 +1827,27 @@ void adi_sharcfx_conv2d_kernel3x3_stride1_valid_pad_int8 (const int8_t* pInputBu
 	}
 }
 
-/*UTILITY FUCNTION*/
-//TODO: Add comment on function of utility function
+/**
+*******************************************************************************
+* Function: transform_weights
+* @brief Reorders weight tensor layout from filter-first to channel-interleaved format
+*
+* @details Transforms weights from layout [nNumKernels][nKernelH][nKernelW][nKernelCh]
+*          to interleaved layout [nKernelH][nKernelW][nKernelCh][nNumKernels] so that
+*          all filter values for a given spatial/channel position are contiguous in memory.
+*
+* Parameters:
+* @param [in]  pOldBuffer  - source weight buffer in original layout
+* @param [out] pNewBuffer  - destination buffer for reordered weights
+* @param [in]  nKernelH    - kernel height
+* @param [in]  nKernelW    - kernel width
+* @param [in]  nKernelCh   - number of input channels per kernel
+* @param [in]  nNumKernels - number of output kernels (filters)
+*
+* @return None
+*
+*******************************************************************************
+*/
 void transform_weights(
 		int8_t* pOldBuffer,
 		int8_t* pNewBuffer,
@@ -1849,9 +1875,29 @@ void transform_weights(
 }
 
 
-/*UTILITY FUNCTION*/
-//TODO: Add comment on function of utility function
-inline int8_t quantize_and_store(
+/**
+*******************************************************************************
+* Function: quantize_and_store
+* @brief Reduces a vector accumulator to a single quantized int8 output value
+*
+* @details Performs a horizontal reduction of the 16-lane 40-bit accumulator,
+*          adds bias, applies 32-bit saturation, multiplies by the per-channel
+*          quantization multiplier, shifts, adds the output zero point, and
+*          saturates the result to the int8 range.
+*
+* Parameters:
+* @param [in] acc                       - 16-lane 40-bit accumulator holding the MAC result
+* @param [in] pBiasBuffer               - bias value for the current output channel
+* @param [in] nQuantizedMultiplierValue - per-channel quantization multiplier
+* @param [in] nQuantizedShiftValue      - per-channel quantization shift
+* @param [in] nFil                      - current filter (output channel) index
+* @param [in] pOutZeroPoint             - output zero point offset
+*
+* @return Quantized and saturated int8 output sample
+*
+*******************************************************************************
+*/
+static inline int8_t quantize_and_store(
 				xb_vec2Mx40 acc,
 				int32_t pBiasBuffer,
 				int32_t nQuantizedMultiplierValue,
@@ -1877,16 +1923,37 @@ inline int8_t quantize_and_store(
 
 	temp = PDX_PACKQSRV_80(product,ROUNDING_MODE_2);				//packs 80bit product into 32bit var with saturation and rounding
 	temp+= (xb_int32)pOutZeroPoint;									//add output offset
-	temp = MIN(temp, (xb_int32)INT_8BIT_MAX);
-	temp = MAX(temp, (xb_int32)INT_8BIT_MIN);//8bit saturation check to store result
+	temp = MIN(temp, (xb_int32)ACT_MAX);
+	temp = MAX(temp, (xb_int32)ACT_MIN);//8bit saturation check to store result
 
 	return (int8_t)((int32_t)temp);
 }
 
 
-/*UTILITY FUCNTION*/
-//Pad image with zeros as per the number or height and width
-
+/**
+*******************************************************************************
+* Function: pad_image_intrinsic
+* @brief Pads an int8 image tensor with a constant value using vector intrinsics
+*
+* @details Adds symmetric padding around the height and width dimensions of the
+*          input feature map. Padding pixels are filled with (-nZeroPoint) so that
+*          the zero-point-adjusted value represents zero. Row copies use PDX
+*          aligned vector loads/stores for performance.
+*
+* Parameters:
+* @param [in]  pInputBuffer  - input feature map (HxWxC, interleaved channels)
+* @param [out] pOutputBuffer - output padded buffer, must be pre-allocated
+* @param [in]  nInHeight     - input feature map height
+* @param [in]  nInWidth      - input feature map width
+* @param [in]  nInChannels   - number of input channels
+* @param [in]  nZeroPoint    - input zero point; padding pixels are set to -nZeroPoint
+* @param [in]  nPadHeight    - total rows of padding (split evenly top/bottom)
+* @param [in]  nPadWidth     - total columns of padding (split evenly left/right)
+*
+* @return None
+*
+*******************************************************************************
+*/
 void pad_image_intrinsic (
     int8_t* pInputBuffer,
     int8_t* pOutputBuffer,
@@ -1966,6 +2033,29 @@ void pad_image_intrinsic (
     }
 }
 
+/**
+*******************************************************************************
+* Function: pad_image_optimized
+* @brief Pads an int8 image tensor with a constant value using simple byte copies
+*
+* @details Functionally equivalent to pad_image_intrinsic but uses a scalar
+*          byte-copy loop instead of vector intrinsics for the row data copy.
+*          Padding pixels are filled with (-nZeroPoint).
+*
+* Parameters:
+* @param [in]  pInputBuffer  - input feature map (HxWxC, interleaved channels)
+* @param [out] pOutputBuffer - output padded buffer, must be pre-allocated
+* @param [in]  nInHeight     - input feature map height
+* @param [in]  nInWidth      - input feature map width
+* @param [in]  nInChannels   - number of input channels
+* @param [in]  nZeroPoint    - input zero point; padding pixels are set to -nZeroPoint
+* @param [in]  nPadHeight    - total rows of padding (split evenly top/bottom)
+* @param [in]  nPadWidth     - total columns of padding (split evenly left/right)
+*
+* @return None
+*
+*******************************************************************************
+*/
 void pad_image_optimized (
     int8_t* pInputBuffer,
     int8_t* pOutputBuffer,
@@ -2023,6 +2113,29 @@ void pad_image_optimized (
     }
 }
 
+/**
+*******************************************************************************
+* Function: pad_image
+* @brief Reference (non-optimized) implementation of image padding
+*
+* @details Iterates over every pixel of the output padded buffer and fills
+*          border regions with (-nZeroPoint) using memset/memcpy. This is the
+*          baseline scalar version; prefer pad_image_intrinsic for performance.
+*
+* Parameters:
+* @param [in]  pInputBuffer  - input feature map (HxWxC, interleaved channels)
+* @param [out] pOutputBuffer - output padded buffer, must be pre-allocated
+* @param [in]  nInHeight     - input feature map height
+* @param [in]  nInWidth      - input feature map width
+* @param [in]  nInChannels   - number of input channels
+* @param [in]  nZeroPoint    - input zero point; padding pixels are set to -nZeroPoint
+* @param [in]  nPadHeight    - total rows of padding (split evenly top/bottom)
+* @param [in]  nPadWidth     - total columns of padding (split evenly left/right)
+*
+* @return None
+*
+*******************************************************************************
+*/
 void pad_image (
 		int8_t* pInputBuffer,
 		int8_t* pOutputBuffer,
@@ -2075,8 +2188,32 @@ void pad_image (
 	}
 }
 
-/*UTILITY FUCNTION*/
-//Copy the input output kernel number of times for convolution
+/**
+*******************************************************************************
+* Function: get_padded_input
+* @brief Rearranges a kernel-sized input patch into a filter-replicated layout
+*
+* @details For a spatial patch of size [nKernelH x nKernelW x nKernelCh], each
+*          input value is replicated nNumKernels times consecutively so that the
+*          output buffer is organised as [nKernelH][nKernelW][nKernelCh][nNumKernels].
+*          This layout allows a single contiguous read to feed all output channels
+*          for one input position during convolution.
+*
+* Parameters:
+* @param [in]  pOldBuffer  - source input buffer (original HxWxC layout)
+* @param [out] pNewBuffer  - destination buffer in replicated layout
+* @param [in]  nKernelH    - kernel height
+* @param [in]  nKernelW    - kernel width
+* @param [in]  nKernelCh   - number of input channels covered by the kernel
+* @param [in]  nNumKernels - number of output kernels; each value is replicated this many times
+* @param [in]  nInputH     - full input feature map height (used for stride computation)
+* @param [in]  nInputW     - full input feature map width  (used for stride computation)
+* @param [in]  nInputCh    - full input feature map channel count
+*
+* @return None
+*
+*******************************************************************************
+*/
 void get_padded_input(
 		int8_t* pOldBuffer,
 		int8_t* pNewBuffer,
@@ -2103,6 +2240,30 @@ void get_padded_input(
 	}
 }
 
+/**
+*******************************************************************************
+* Function: get_padded_input_intrinsic
+* @brief Rearranges a kernel-sized input patch into a filter-replicated layout using vector intrinsics
+*
+* @details Functionally equivalent to get_padded_input but uses PDX 4Mx8 vector
+*          store intrinsics to broadcast each input value nNumKernels times,
+*          improving throughput for large nNumKernels values.
+*
+* Parameters:
+* @param [in]  pOldBuffer  - source input buffer (original HxWxC layout)
+* @param [out] pNewBuffer  - destination buffer in replicated layout
+* @param [in]  nKernelH    - kernel height
+* @param [in]  nKernelW    - kernel width
+* @param [in]  nKernelCh   - number of input channels covered by the kernel
+* @param [in]  nNumKernels - number of output kernels; each value is replicated this many times
+* @param [in]  nInputH     - full input feature map height
+* @param [in]  nInputW     - full input feature map width
+* @param [in]  nInputCh    - full input feature map channel count
+*
+* @return None
+*
+*******************************************************************************
+*/
 void get_padded_input_intrinsic(
     int8_t* pOldBuffer,
     int8_t* pNewBuffer,
@@ -2144,6 +2305,30 @@ void get_padded_input_intrinsic(
         }
     }
 }
+/**
+*******************************************************************************
+* Function: get_padded_input_byte
+* @brief Rearranges a kernel-sized input patch into a filter-replicated layout using scalar byte copies
+*
+* @details Functionally equivalent to get_padded_input_intrinsic but uses a
+*          plain scalar byte loop instead of vector intrinsics. Intended as a
+*          portable reference or fallback implementation.
+*
+* Parameters:
+* @param [in]  pOldBuffer  - source input buffer (original HxWxC layout)
+* @param [out] pNewBuffer  - destination buffer in replicated layout
+* @param [in]  nKernelH    - kernel height
+* @param [in]  nKernelW    - kernel width
+* @param [in]  nKernelCh   - number of input channels covered by the kernel
+* @param [in]  nNumKernels - number of output kernels; each value is replicated this many times
+* @param [in]  nInputH     - full input feature map height
+* @param [in]  nInputW     - full input feature map width
+* @param [in]  nInputCh    - full input feature map channel count
+*
+* @return None
+*
+*******************************************************************************
+*/
 void get_padded_input_byte(
     int8_t* pOldBuffer,
     int8_t* pNewBuffer,
@@ -2235,6 +2420,7 @@ void adi_sharcfx_conv2d_dilation1x1_int8(
 		int32_t nActMin,
 		int32_t nActMax)
 {
+	if (!pInputBuffer || !pWeightsBuffer || !pOutputBuffer) return;
 	xb_vecMx8* __restrict outp  = (xb_vecMx8 *)pOutputBuffer;
 	valign outa = PDX_LA_MX8_PP (outp); // prime, NOP if a[] is aligned
 	const immediate Lane=0;
@@ -2258,7 +2444,7 @@ void adi_sharcfx_conv2d_dilation1x1_int8(
 	int32_t nIndexBuffer = 128;
 
 
-	transform_weights((int8_t*) pWeightsBuffer,(int8_t*)&pTemp[nPaddedInputSize+nIndexBuffer], nKernelHeight,nKernelWidth,nInChannels, nNumKernels);
+	transform_weights((int8_t*) pWeightsBuffer,(int8_t*)&pTempL1[nPaddedInputSize+nIndexBuffer], nKernelHeight,nKernelWidth,nInChannels, nNumKernels);
 
 
 	xb_vec2Mx8 *wtp;// = (xb_vec2Mx8 *)pWeightsBuffer;
@@ -2290,7 +2476,7 @@ void adi_sharcfx_conv2d_dilation1x1_int8(
 	for (int32_t nBatch = 0; nBatch < nBatches; ++nBatch) 
 	{
 		//Get padded image
-		pad_image_intrinsic((int8_t*) (pInputBuffer+nBatch*nInputHeight*nInputWidth*nInChannels),(int8_t*)pTemp, nInputHeight, nInputWidth, nInChannels,pInZeroPoint, nTotalPadHeight,nTotalPadWidth);
+		pad_image_intrinsic((int8_t*) (pInputBuffer+nBatch*nInputHeight*nInputWidth*nInChannels),(int8_t*)pTempL1, nInputHeight, nInputWidth, nInChannels,pInZeroPoint, nTotalPadHeight,nTotalPadWidth);
 
 		for (int32_t out_y = 0; out_y < nOutputHeight; ++out_y) 
 		{
@@ -2299,15 +2485,15 @@ void adi_sharcfx_conv2d_dilation1x1_int8(
 			{
 				nPixLeft = nOutChannels;
 				//Extract the corresponding input buffer
-                get_padded_input_byte((int8_t*) (pTemp+out_y*stride_height*nInChannels*(nInputWidth+nTotalPadWidth)+stride_width*out_x*nInChannels),(int8_t*)&pTemp[nPaddedInputSize+nIndexBuffer+nWeightBufSize], nKernelHeight,nKernelWidth,nInChannels, nNumKernels, nInputHeight+nTotalPadHeight,nInputWidth+nTotalPadWidth,nInChannels);
+                get_padded_input_byte((int8_t*) (pTempL1+out_y*stride_height*nInChannels*(nInputWidth+nTotalPadWidth)+stride_width*out_x*nInChannels),(int8_t*)&pTempL1[nPaddedInputSize+nIndexBuffer+nWeightBufSize], nKernelHeight,nKernelWidth,nInChannels, nNumKernels, nInputHeight+nTotalPadHeight,nInputWidth+nTotalPadWidth,nInChannels);
 
 				for (int32_t nOutChannel = 0; nOutChannel < nOutChannelsMod16; nOutChannel+=2*PDX_M) 
 				{
-					inp = (xb_vec2Mx8*)(&pTemp[nPaddedInputSize+nIndexBuffer+nWeightBufSize] + nOutChannel);
+					inp = (xb_vec2Mx8*)(&pTempL1[nPaddedInputSize+nIndexBuffer+nWeightBufSize] + nOutChannel);
 					valign ina; // define align vector
 					ina=PDX_LA_2MX8_PP (inp); // prime, NOP if a[] is aligned
 
-					wtp = (xb_vec2Mx8*)(&pTemp[nPaddedInputSize+nIndexBuffer]+ nOutChannel);
+					wtp = (xb_vec2Mx8*)(&pTempL1[nPaddedInputSize+nIndexBuffer]+ nOutChannel);
 					valign wta;	// define align vector
 					wta=PDX_LA_2MX8_PP (wtp);
 
@@ -2392,11 +2578,11 @@ void adi_sharcfx_conv2d_dilation1x1_int8(
 				//Handle non-multiple of 16 pixels
 				if(nPixLeft>0)
 				{
-					inp = (xb_vec2Mx8*)(&pTemp[nPaddedInputSize+nIndexBuffer+nWeightBufSize] + nOutChannelsMod16);
+					inp = (xb_vec2Mx8*)(&pTempL1[nPaddedInputSize+nIndexBuffer+nWeightBufSize] + nOutChannelsMod16);
 					valign ina; // define align vector
 					ina=PDX_LA_2MX8_PP (inp); // prime, NOP if a[] is aligned
 
-					wtp = (xb_vec2Mx8*)(&pTemp[nPaddedInputSize+nIndexBuffer]+ nOutChannelsMod16);
+					wtp = (xb_vec2Mx8*)(&pTempL1[nPaddedInputSize+nIndexBuffer]+ nOutChannelsMod16);
 					valign wta;	// define align vector
 					wta=PDX_LA_2MX8_PP (wtp);
 
@@ -2491,4 +2677,296 @@ void adi_sharcfx_conv2d_dilation1x1_int8(
 			}
 		}
 	}
+}
+
+
+/**
+*******************************************************************************
+* Function: adi_sharcfx_conv2d_kernel1x1_int8_reordered_weights
+* @brief Optimized 1x1 conv2d for int8 input with pre-reordered (output-channel-major) weights
+*
+* @details Performs batched 1x1 2D convolution using 16-bit Eagle intrinsics.
+*          Weights must be pre-reordered into a blocked output-channel-major layout
+*          [nOutChannels / 16][nInChannels][16] so that 16 contiguous output-channel
+*          weights for a given input channel are loaded in a single vector read.
+*          Processes output channels in blocks of 2*PDX_M (16), with a scalar tail
+*          for the remainder. Applies per-channel requantization, output zero point,
+*          and activation clamping before storing int8 results.
+*
+* Parameters:
+* @param [in]  pInputBuffer          - input data (nBatches x nInputHeight x nInputWidth x nInChannels)
+* @param [in]  pWeightsBuffer        - pre-reordered weight data
+* @param [in]  pBiasBuffer           - per-output-channel bias values (may be NULL)
+* @param [out] pOutputBuffer         - output data
+* @param [in]  nBatches              - batch size
+* @param [in]  nInChannels           - number of input channels
+* @param [in]  nOutChannels          - number of output channels
+* @param [in]  nKernelHeight         - kernel height (must be 1 for this function)
+* @param [in]  nKernelWidth          - kernel width  (must be 1 for this function)
+* @param [in]  nNumKernels           - total number of kernels (equals nOutChannels)
+* @param [in]  nInputWidth           - input spatial width
+* @param [in]  nInputHeight          - input spatial height
+* @param [in]  stride_height         - convolution stride along height
+* @param [in]  stride_width          - convolution stride along width
+* @param [in]  nPadHeight            - total padding along height
+* @param [in]  nPadWidth             - total padding along width
+* @param [in]  nOutHeight            - output spatial height
+* @param [in]  nOutWidth             - output spatial width
+* @param [in]  pQuantizedMultiplier  - per-output-channel quantization multiplier
+* @param [in]  pQuantizedShift       - per-output-channel quantization shift
+* @param [in]  pInZeroPoint          - input zero point
+* @param [in]  pOutZeroPoint         - output zero point
+* @param [in]  nFilterZeroPoint      - filter zero point
+* @param [in]  nActMin               - minimum activation value (post-activation clamp)
+* @param [in]  nActMax               - maximum activation value (post-activation clamp)
+*
+* @return None
+*
+*******************************************************************************
+*/
+void adi_sharcfx_conv2d_kernel1x1_int8_reordered_weights(	const int8_t* pInputBuffer,
+															const int8_t* pWeightsBuffer,
+															const int32_t* pBiasBuffer,
+															int8_t* pOutputBuffer,
+															int32_t nBatches,
+															int32_t nInChannels,
+															int32_t nOutChannels,
+															int32_t nKernelHeight,
+															int32_t nKernelWidth,
+															int32_t nNumKernels,
+															int32_t nInputWidth,
+															int32_t nInputHeight,
+															int32_t stride_height,
+															int32_t stride_width,
+															int32_t nPadHeight,
+															int32_t nPadWidth,
+															int32_t nOutHeight,
+															int32_t nOutWidth,
+															int32_t *pQuantizedMultiplier,
+															int32_t *pQuantizedShift,
+															int32_t pInZeroPoint,
+															int32_t pOutZeroPoint,
+															int32_t nFilterZeroPoint,
+															int32_t nActMin,
+															int32_t nActMax)
+{
+	if (!pInputBuffer || !pWeightsBuffer || !pOutputBuffer) return;
+	/* Broadcast scalars into vector registers */
+	xb_vec2Mx16 vInZP     = pInZeroPoint;
+	xb_vec2Mx16 vFilterZP = nFilterZeroPoint;
+	xb_vecMx32  vOutZP    = pOutZeroPoint;
+	xb_vecMx32  vmin      = nActMin;
+	xb_vecMx32  vmax      = nActMax;
+
+	const immediate round_mode = 2;
+
+	xb_vec2Mx16 vin, vwt;
+	xb_vec2Mx40 acc;
+	xb_vecMx32  first8, last8;
+	xb_vecMx80  quant_acc, quant_acc2;
+	xb_vecMx32  mult_l, mult_h;
+	xb_vecMx32  shift_l, shift_h;
+	xb_vecMx32  vbias_l, vbias_h;
+	xb_vecMx32  out_l, out_h;
+
+	for (int32_t b = 0; b < nBatches; b++)
+	{
+		for (int32_t oh = 0; oh < nOutHeight; oh++)
+		{
+			int32_t ih = oh * stride_height;
+
+			for (int32_t ow = 0; ow < nOutWidth; ow++)
+			{
+				int32_t iw = ow * stride_width;
+
+				/* Input pointer for this spatial position: input[b, ih, iw, :] */
+				const int8_t *inp = pInputBuffer
+					+ ((b * nInputHeight + ih) * nInputWidth + iw) * nInChannels;
+
+				/* Output pointer: output[b, oh, ow, :] */
+				int8_t *out_base = pOutputBuffer
+					+ ((b * nOutHeight + oh) * nOutWidth + ow) * nOutChannels;
+
+				xb_vecMx8 *outp = (xb_vecMx8 *)out_base;
+				valign outa = PDX_LA_MX8_PP(outp);
+
+				int32_t nChProcessed = 0;
+				int32_t nChLeft      = nOutChannels;
+
+				/* ============================================================
+				 * Main loop: process 2*PDX_M (16) output channels per iteration
+				 * ============================================================ */
+				while (nChLeft >= 2 * PDX_M)
+				{
+					acc = 0;
+
+					const int8_t *inp_ptr = (int8_t *)inp;
+
+					/* Weight pointer: start of this output channel block
+					 * Blocked layout: block b at offset b * nInChannels * block_size
+					 * Since block_size = 2*PDX_M and b = nChProcessed / (2*PDX_M):
+					 *   offset = nChProcessed * nInChannels                        */
+					xb_vec2Mx8 *wtp = (xb_vec2Mx8 *)(pWeightsBuffer + nChProcessed * nInChannels);
+					valign wta = PDX_LA_2MX8_PP(wtp);
+
+					/* Load per-channel bias (shift left by 1 to match accumulator scaling) */
+					if (pBiasBuffer) {
+						xb_vecMx32 *biasp = (xb_vecMx32 *)(pBiasBuffer + nChProcessed);
+						valign biasa = PDX_LA_MX32_PP(biasp);
+
+						PDX_LA_MX32_XP(vbias_l, biasa, biasp, PDX_M * sizeof(int32_t));
+						PDX_LA_MX32_XP(vbias_h, biasa, biasp, 0);
+
+						vbias_l = PDX_SLS_MX32(vbias_l, 1);
+						vbias_h = PDX_SLS_MX32(vbias_h, 1);
+					}
+
+					/* Load per-channel multipliers */
+					xb_vecMx32 *multp = (xb_vecMx32 *)(pQuantizedMultiplier + nChProcessed);
+					valign multa = PDX_LA_MX32_PP(multp);
+					PDX_LA_MX32_XP(mult_l, multa, multp, PDX_M * sizeof(int32_t));
+					PDX_LA_MX32_XP(mult_h, multa, multp, 0);
+
+					/* Load per-channel shifts */
+					xb_vecMx32 *shiftp = (xb_vecMx32 *)(pQuantizedShift + nChProcessed);
+					valign shifta = PDX_LA_MX32_PP(shiftp);
+					PDX_LA_MX32_XP(shift_l, shifta, shiftp, PDX_M * sizeof(int32_t));
+					PDX_LA_MX32_XP(shift_h, shifta, shiftp, 0);
+
+					/* Inner loop: accumulate over all input channels */
+					for (int32_t d = 0; d < nInChannels; d++)
+					{
+						vin = (*inp_ptr++);                              /* broadcast scalar input */
+						PDX_LA16_2MX8_XP(vwt, wta, wtp, 2 * PDX_M);    /* load 16 contiguous weights */
+						vin += vInZP;
+						vwt += vFilterZP;
+
+						PDX_MULAQW_2MX16(acc, vwt, vin);
+					}
+
+					/* Split 16-wide accumulator into two 8-wide int32 vectors */
+					PDX_CVT32D_2MX40(last8, first8, acc);
+
+					if (pBiasBuffer) {
+						first8 += vbias_l;
+						last8  += vbias_h;
+					}
+
+					/* Per-channel requantization */
+					quant_acc  = mult_l * first8;
+					quant_acc2 = mult_h * last8;
+					quant_acc  = PDX_SLS_MX80(quant_acc,  shift_l);
+					quant_acc2 = PDX_SLS_MX80(quant_acc2, shift_h);
+					out_l = PDX_PACKQSRV_MX80(quant_acc,  round_mode);
+					out_h = PDX_PACKQSRV_MX80(quant_acc2, round_mode);
+
+					out_l += vOutZP;
+					out_h += vOutZP;
+
+					out_l = PDX_MIN_MX32(out_l, vmax);
+					out_l = PDX_MAX_MX32(out_l, vmin);
+					out_h = PDX_MIN_MX32(out_h, vmax);
+					out_h = PDX_MAX_MX32(out_h, vmin);
+
+					/* Store 16 output channels */
+					PDX_SAV32_MX8_XP(out_l, outa, outp, PDX_M);
+					PDX_SAPOS_MX8_FP(outa, outp);
+					PDX_SAV32_MX8_XP(out_h, outa, outp, PDX_M);
+					PDX_SAPOS_MX8_FP(outa, outp);
+
+					nChProcessed += 2 * PDX_M;
+					nChLeft      -= 2 * PDX_M;
+				}
+
+				/* ============================================================
+				 * Tail: remaining output channels (< 2*PDX_M = 16)
+				 * ============================================================ */
+				if (nChLeft > 0)
+				{
+					acc = 0;
+
+					const int8_t *inp_ptr = (int8_t *)inp;
+
+					xb_vec2Mx8 *wtp = (xb_vec2Mx8 *)(pWeightsBuffer + nChProcessed * nInChannels);
+					valign wta = PDX_LA_2MX8_PP(wtp);
+
+					if (pBiasBuffer) {
+						xb_vecMx32 *biasp = (xb_vecMx32 *)(pBiasBuffer + nChProcessed);
+						valign biasa = PDX_LA_MX32_PP(biasp);
+
+						PDX_LA_MX32_XP(vbias_l, biasa, biasp, PDX_M * sizeof(int32_t));
+						PDX_LA_MX32_XP(vbias_h, biasa, biasp, 0);
+
+						vbias_l = PDX_SLS_MX32(vbias_l, 1);
+						vbias_h = PDX_SLS_MX32(vbias_h, 1);
+					}
+
+					xb_vecMx32 *multp = (xb_vecMx32 *)(pQuantizedMultiplier + nChProcessed);
+					valign multa = PDX_LA_MX32_PP(multp);
+					PDX_LA_MX32_XP(mult_l, multa, multp, PDX_M * sizeof(int32_t));
+					PDX_LA_MX32_XP(mult_h, multa, multp, 0);
+
+					xb_vecMx32 *shiftp = (xb_vecMx32 *)(pQuantizedShift + nChProcessed);
+					valign shifta = PDX_LA_MX32_PP(shiftp);
+					PDX_LA_MX32_XP(shift_l, shifta, shiftp, PDX_M * sizeof(int32_t));
+					PDX_LA_MX32_XP(shift_h, shifta, shiftp, 0);
+
+				/* Tail weight stride: nChLeft (packed with stride = remainder).
+					 * The 16-wide load reads nChLeft valid lanes per row and
+					 * spills into the next row for upper lanes � those lanes
+					 * correspond to non-existent output channels and are never
+					 * stored, so this is safe. */
+					for (int32_t d = 0; d < nInChannels; d++)
+					{
+						vin = (*inp_ptr++);
+						PDX_LA16_2MX8_XP(vwt, wta, wtp, nChLeft);
+						wta = PDX_LA_2MX8_PP(wtp);
+						vin += vInZP;
+						vwt += vFilterZP;
+
+						PDX_MULAQW_2MX16(acc, vwt, vin);
+					}
+
+					PDX_CVT32D_2MX40(last8, first8, acc);
+
+					if (pBiasBuffer) {
+						first8 += vbias_l;
+					}
+
+					quant_acc = mult_l * first8;
+					quant_acc = PDX_SLS_MX80(quant_acc, shift_l);
+					out_l = PDX_PACKQSRV_MX80(quant_acc, round_mode);
+
+					out_l += vOutZP;
+					out_l = PDX_MIN_MX32(out_l, vmax);
+					out_l = PDX_MAX_MX32(out_l, vmin);
+
+					int16_t nPixToWrite = MIN(nChLeft, PDX_M);
+					PDX_SAV32_MX8_XP(out_l, outa, outp, nPixToWrite);
+					PDX_SAPOS_MX8_FP(outa, outp);
+					nChLeft -= nPixToWrite;
+
+					if (nChLeft > 0)
+					{
+						if (pBiasBuffer) {
+							last8 += vbias_h;
+						}
+
+						quant_acc = mult_h * last8;
+						quant_acc = PDX_SLS_MX80(quant_acc, shift_h);
+						out_h = PDX_PACKQSRV_MX80(quant_acc, round_mode);
+
+						out_h += vOutZP;
+						out_h = PDX_MIN_MX32(out_h, vmax);
+						out_h = PDX_MAX_MX32(out_h, vmin);
+
+						nPixToWrite = MIN(nChLeft, PDX_M);
+						PDX_SAV32_MX8_XP(out_h, outa, outp, nPixToWrite);
+						PDX_SAPOS_MX8_FP(outa, outp);
+					}
+				}
+
+			} /* ow */
+		} /* oh */
+	} /* batch */
 }

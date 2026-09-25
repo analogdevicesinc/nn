@@ -1,7 +1,7 @@
 /**
 ********************************************************************************
 *
-* @file: adi_sharcfx_maxpool.c
+* @file: adi_sharcfx_maxpool.cpp
 *
 * @brief: Contains optimized maxpool function
 *
@@ -66,7 +66,7 @@ void adi_sharcfx_maxpool_int8(
 							const int32_t ch_src,
 						    const int8_t *src,
 						    int8_t *dst)
-{
+{	if (!src || !dst) return;
 	xb_vec4Mx8 in_vec0;
 	xb_vec4Mx8 act_ll = act_min;
 	xb_vec4Mx8 act_hl = act_max;
@@ -90,7 +90,7 @@ void adi_sharcfx_maxpool_int8(
 			for (int nc = 0; nc < ch_src;nc += 4*PDX_M)
 			{
 				valign pvOuta = PDX_LA_4MX8_PP(pvOut);
-				xb_vec4Mx8 out = 0xFFffFF80;
+				xb_vec4Mx8 out = (xb_vec4Mx8)ACT_MIN; /* Initialize to minimum int8 value; first comparison always wins. */
 				for (int k_y = 0; k_y < k_y_end - k_y_start; k_y++)
 				{
 					for (int k_x = 0; k_x < k_x_end - k_x_start; k_x++)
